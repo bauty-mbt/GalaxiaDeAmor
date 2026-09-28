@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Una galaxia de amor para ti</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Jost:wght@400;500;700&display=swap">
+<style>
+:root{--fondo:#050208;--rosa:#ff3d9a;--violeta:#a06bff;--celeste:#5ce1ff;--blanco:#ffffff;--serif:"Playfair Display",Georgia,serif;--sans:"Jost",system-ui,sans-serif;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*,*::before,*::after{box-sizing:inherit}
+html,body{height:100%;margin:0;background:var(--fondo);color:#f6e6ff;font-family:var(--sans);overflow:hidden}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.velo{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;transition:opacity 1.2s ease,visibility 1.2s}
+.velo.off{opacity:0;visibility:hidden;pointer-events:none}
+.tarjeta{width:min(420px,100%);padding:34px 28px;text-align:center;border:2px solid transparent;border-radius:22px;
+  background:linear-gradient(rgba(14,5,22,.94),rgba(14,5,22,.94)) padding-box,linear-gradient(135deg,var(--rosa),var(--violeta),var(--celeste),var(--blanco),var(--rosa)) border-box;
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+h1,h2{font-family:var(--serif);font-weight:600;margin:0 0 12px;line-height:1.15}
+h1{font-size:clamp(2rem,8vw,2.7rem)}
+h2{font-size:1.6rem}
+.sub{margin:0 0 26px;color:#e3b8ff;font-style:italic;font-family:var(--serif)}
+button{font:500 1rem var(--sans);color:#fff;background:linear-gradient(135deg,var(--rosa),var(--violeta));border:0;border-radius:999px;padding:13px 26px;cursor:pointer}
+button:focus-visible{outline:2px solid #fff;outline-offset:3px}
+#modal .tarjeta{max-height:90vh;overflow:auto}
+#modal img{display:block;height:min(44vh,340px);aspect-ratio:5.5/8.5;width:auto;max-width:100%;object-fit:cover;margin:0 auto 18px;border-radius:14px;border:2px solid var(--celeste)}
+#modal img[hidden]{display:none}
+#modal p{line-height:1.6;margin:0 0 24px;color:#f1dcff}
+.pista{position:fixed;left:0;right:0;bottom:calc(16px + env(safe-area-inset-bottom,0px));text-align:center;font-size:.85rem;color:#c9a3f0;pointer-events:none;transition:opacity 1s}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="velo" id="intro"><div class="tarjeta"><h1 id="tit"></h1><p class="sub" id="sub"></p><button id="entrar"></button></div></div>
+<div class="velo off" id="modal" role="dialog" aria-modal="true"><div class="tarjeta"><img id="mi" alt="" hidden><h2 id="mt"></h2><p id="mx"></p><button id="volver">Volver</button></div></div>
+<div class="pista" id="pista" style="opacity:0"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ============ PERSONALIZÁ ACÁ ============ */
+const CFG={
+  titulo:"Una galaxia de amor para ti",
+  sub:"Desde lejos, siempre en tu primera fila",
+  boton:"Entrar a nuestro universo",
+  pista:"Arrastra para girar. Toca una photocard para abrirla.",
+
+  // Paleta: rosa como base + acentos neón tipo lightstick
+  colores:{fondo:"#050208",rosa:"#ff3d9a",violeta:"#a06bff",celeste:"#5ce1ff",blanco:"#ffffff"},
+
+  // Bandas que orbitan en la escena. Agregá las demás acá, por ejemplo: ["BOYNEXTDOOR","BANDA 2","BANDA 3"]
+  bandas:["BOYNEXTDOOR"],
+
+  // Frases que orbitan (editables, agregá o quitá las que quieras)
+  frases:[
+    "Mi bias eres tú",
+    "Contigo todo es comeback",
+    "Cuenta regresiva al 24/11",
+    "Contigo hasta el encore",
+    "Cada día menos para verte",
+    "Tan lejos y tan cerca",
+    "Mi corazón está donde estás tú",
+    "Eres mi canción favorita",
+    "La distancia es solo un intermedio",
+    "Te elijo en cada era"
+  ],
+
+  // Contador regresivo. La fecha usa la hora del dispositivo.
+  // Formato AAAA-MM-DDTHH:MM:SS. Si sabés la hora del show, ponela (ej: 2026-11-24T20:00:00).
+  contador:{
+    fecha:"2026-11-24T00:00:00",
+    etiqueta:"Faltan para el concierto",
+    textoFin:"¡Es hoy! A cantar todo"
+  },
+
+  // Las 4 photocards. img: URL de una foto de internet (opcional, se ve al abrir la tarjeta).
+  recuerdos:[
+    {t:"Amor de mi vida",x:"Aunque nos separen los kilómetros, cada día te quiero más.",img:""},
+    {t:"Para ti",x:"Para ti, que hiciste latir mi corazón de una forma única. En cada latido, estás tú.",img:""},
+    {t:"Cuenta regresiva",x:"Falta poco para que cantes tus canciones favoritas. Voy a estar ahí con el corazón, en cada coro.",img:""},
+    {t:"Para siempre",x:"No importa cuántos kilómetros haya, en cada vida te elegiría a ti.",img:""}
+  ]
+};
+/* ========================================= */
+
+const $=id=>document.getElementById(id);
+const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const liviano=Math.min(innerWidth,innerHeight)<700||matchMedia("(pointer:coarse)").matches;
+
+const col={};
+for(const k in CFG.colores){col[k]=new THREE.Color(CFG.colores[k]);document.documentElement.style.setProperty("--"+k,CFG.colores[k])}
+$("tit").textContent=CFG.titulo;$("sub").textContent=CFG.sub;$("entrar").textContent=CFG.boton;$("pista").textContent=CFG.pista;
+
+const cv=$("c"),R=new THREE.WebGLRenderer({canvas:cv,antialias:false,powerPreference:"high-performance"});
+R.setPixelRatio(Math.min(devicePixelRatio,liviano?1.5:2));
+R.setClearColor(col.fondo);
+const S=new THREE.Scene(),cam=new THREE.PerspectiveCamera(60,1,.1,200);
+const G=new THREE.Group();S.add(G);
+
+function disco(){const c=document.createElement("canvas");c.width=c.height=64;const x=c.getContext("2d"),g=x.createRadialGradient(32,32,0,32,32,32);g.addColorStop(0,"#fff");g.addColorStop(.35,"rgba(255,255,255,.55)");g.addColorStop(1,"rgba(255,255,255,0)");x.fillStyle=g;x.fillRect(0,0,64,64);return new THREE.CanvasTexture(c)}
+const D=disco();
+function nube(pos,cl,size){const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.BufferAttribute(pos,3));g.setAttribute("color",new THREE.BufferAttribute(cl,3));const m=new THREE.PointsMaterial({size,map:D,vertexColors:true,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending});return new THREE.Points(g,m)}
+
+/* galaxia espiral: rosa al centro, violeta afuera, chispas neón */
+(function(){const N=reduce?8000:(liviano?13000:22000),p=new Float32Array(N*3),c=new Float32Array(N*3),q=new THREE.Color();
+for(let i=0;i<N;i++){const r=Math.pow(Math.random(),1.5)*15+.4,a=(i%3)/3*Math.PI*2+r*.5,d=r*.06+.05,
+ o=()=>(Math.random()-.5)*d*(1+Math.random()*4);
+ p[i*3]=Math.cos(a)*r+o();p[i*3+1]=(Math.random()-.5)*.5*(1-r/17)+o()*.15;p[i*3+2]=Math.sin(a)*r+o();
+ const k=Math.min(r/15,1),u=Math.random(),b=.55+Math.random()*.6;
+ if(u<.06)q.copy(col.celeste);else if(u<.11)q.copy(col.blanco);else q.copy(col.rosa).lerp(col.violeta,k*(.7+Math.random()*.3));
+ c[i*3]=q.r*b;c[i*3+1]=q.g*b;c[i*3+2]=q.b*b}
+G.add(nube(p,c,.13))})();
+
+/* mar de luces de concierto: puntos que titilan (shader liviano) */
+const uni={uT:{value:0},uScale:{value:300},uTw:{value:reduce?0:1}};
+(function(){const N=liviano?800:1600,p=new Float32Array(N*3),c=new Float32Array(N*3),s=new Float32Array(N),f=new Float32Array(N),
+ pal=[col.rosa,col.rosa,col.violeta,col.celeste,col.blanco];
+for(let i=0;i<N;i++){const a=Math.random()*Math.PI*2,r=3+Math.sqrt(Math.random())*23,q=pal[(Math.random()*pal.length)|0];
+ p[i*3]=Math.cos(a)*r;p[i*3+1]=-.4-Math.random()*1.4;p[i*3+2]=Math.sin(a)*r;
+ c[i*3]=q.r;c[i*3+1]=q.g;c[i*3+2]=q.b;s[i]=.16+Math.random()*.26;f[i]=Math.random()}
+const g=new THREE.BufferGeometry();
+g.setAttribute("position",new THREE.BufferAttribute(p,3));g.setAttribute("aCol",new THREE.BufferAttribute(c,3));
+g.setAttribute("aSize",new THREE.BufferAttribute(s,1));g.setAttribute("aPh",new THREE.BufferAttribute(f,1));
+const m=new THREE.ShaderMaterial({uniforms:uni,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+ vertexShader:`attribute float aSize;attribute float aPh;attribute vec3 aCol;uniform float uT,uScale,uTw;varying vec3 vC;varying float vA;
+ void main(){vec3 p=position;p.y+=sin(uT*1.3+aPh*40.)*.1*uTw;p.x+=sin(uT*.8+aPh*25.)*.05*uTw;
+ vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;
+ float tw=mix(1.,.15+.85*pow(.5+.5*sin(uT*(1.5+aPh*3.)+aPh*60.),2.),uTw);
+ vA=tw;vC=aCol;gl_PointSize=aSize*uScale/-mv.z*(.7+.5*tw);}`,
+ fragmentShader:`varying vec3 vC;varying float vA;
+ void main(){float r=length(gl_PointCoord-.5);if(r>.5)discard;float a=1.-smoothstep(0.,.5,r);a=a*a;
+ gl_FragColor=vec4(vC*(.6+.9*vA),min(1.,a*vA*1.4));}`});
+G.add(new THREE.Points(g,m))})();
+
+/* corazón lightstick: corazón de partículas sobre un mango, late y cambia de color */
+const CY=5.4,HG=new THREE.Group();HG.position.y=CY;S.add(HG);
+const HM=(function(){const NH=liviano?4200:7000,NS=liviano?500:800,N=NH+NS,p=new Float32Array(N*3),c=new Float32Array(N*3);
+for(let i=0;i<NH;i++){const t=Math.random()*Math.PI*2,k=.72+.28*Math.random(),
+ x=16*Math.pow(Math.sin(t),3),y=13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t);
+ p[i*3]=x*.17*k;p[i*3+1]=y*.17*k;p[i*3+2]=(Math.random()-.5)*2.4*k;
+ const b=.7+Math.random()*.3;c[i*3]=c[i*3+1]=c[i*3+2]=b}
+for(let j=0;j<NS;j++){const i=NH+j,a=Math.random()*Math.PI*2,r=Math.random()*.11;
+ p[i*3]=Math.cos(a)*r;p[i*3+1]=.15+Math.random()*2.3-CY;p[i*3+2]=Math.sin(a)*r;c[i*3]=c[i*3+1]=c[i*3+2]=1}
+const h=nube(p,c,.11);HG.add(h);return h.material})();
+const halo=new THREE.Sprite(new THREE.SpriteMaterial({map:D,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,opacity:.45}));
+halo.scale.set(11,11,1);halo.position.y=CY-.4;S.add(halo);
+
+/* texto y photocards */
+const orb=[],cards=[];
+function sprite(tex,w,h,add){tex.minFilter=THREE.LinearFilter;const m=new THREE.SpriteMaterial({map:tex,transparent:true,depthWrite:false});if(add)m.blending=THREE.AdditiveBlending;const s=new THREE.Sprite(m);s.scale.set(w,h,1);S.add(s);return s}
+function txt(s,color,peso,brillo){const W=1024,H=128,c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d");
+ let fs=58;do{x.font=peso+" "+fs+'px "Jost",system-ui,sans-serif';fs-=2}while(x.measureText(s).width>W-80&&fs>20);
+ x.textAlign="center";x.textBaseline="middle";
+ x.shadowColor=(brillo||color).getStyle();x.shadowBlur=26;
+ x.fillStyle=color.clone().lerp(col.blanco,.75).getStyle();
+ x.fillText(s,W/2,H/2+2);x.fillText(s,W/2,H/2+2);
+ return new THREE.CanvasTexture(c)}
+function rr(x,X,Y,W,H,r){x.beginPath();x.moveTo(X+r,Y);x.arcTo(X+W,Y,X+W,Y+H,r);x.arcTo(X+W,Y+H,X,Y+H,r);x.arcTo(X,Y+H,X,Y,r);x.arcTo(X,Y,X+W,Y,r);x.closePath()}
+function estrella(x,cx,cy,r){x.beginPath();x.moveTo(cx,cy-r);x.quadraticCurveTo(cx,cy,cx+r,cy);x.quadraticCurveTo(cx,cy,cx,cy+r);x.quadraticCurveTo(cx,cy,cx-r,cy);x.quadraticCurveTo(cx,cy,cx,cy-r);x.fill()}
+function photocard(m,i){const W=330,H=510,c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d");
+ const P=[col.rosa,col.violeta,col.celeste,col.blanco],q=k=>P[(i+k)%4].getStyle();
+ let sd=i*97+13;const rnd=()=>(sd=(sd*16807)%2147483647)/2147483647;
+ /* borde holográfico */
+ let g=x.createLinearGradient(0,0,W,H);
+ [q(0),q(1),q(2),"#ffffff",q(0),q(1),q(2)].forEach((s,j,a)=>g.addColorStop(j/(a.length-1),s));
+ x.fillStyle=g;rr(x,2,2,W-4,H-4,26);x.fill();
+ x.fillStyle="#0e0616";rr(x,12,12,W-24,H-24,18);x.fill();
+ /* arte */
+ x.save();rr(x,22,22,W-44,H-150,14);x.clip();
+ g=x.createLinearGradient(0,22,0,H-128);g.addColorStop(0,"#1b0930");g.addColorStop(1,"#3a0f4f");x.fillStyle=g;x.fillRect(0,0,W,H);
+ g=x.createRadialGradient(W/2,205,10,W/2,205,170);g.addColorStop(0,q(1));g.addColorStop(1,"rgba(0,0,0,0)");x.globalAlpha=.55;x.fillStyle=g;x.fillRect(0,0,W,H);x.globalAlpha=1;
+ x.shadowColor=q(0);x.shadowBlur=30;
+ g=x.createLinearGradient(0,120,0,290);g.addColorStop(0,q(0));g.addColorStop(1,q(2));x.fillStyle=g;x.beginPath();
+ for(let t=0;t<=Math.PI*2+.05;t+=.05){const px=W/2+6.2*16*Math.pow(Math.sin(t),3),py=200-6.2*(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t));t?x.lineTo(px,py):x.moveTo(px,py)}
+ x.fill();x.shadowBlur=0;x.fillStyle="#fff";
+ for(let j=0;j<16;j++)estrella(x,30+rnd()*(W-60),30+rnd()*(H-190),2+rnd()*5);
+ x.restore();
+ /* brillo diagonal */
+ x.save();rr(x,2,2,W-4,H-4,26);x.clip();
+ g=x.createLinearGradient(0,H*.1,W,H*.6);g.addColorStop(0,"rgba(255,255,255,0)");g.addColorStop(.5,"rgba(255,255,255,.2)");g.addColorStop(1,"rgba(255,255,255,0)");
+ x.fillStyle=g;x.fillRect(0,0,W,H);x.restore();
+ /* título */
+ x.textAlign="center";x.textBaseline="middle";x.fillStyle="#fff";x.shadowColor=q(0);x.shadowBlur=14;
+ let fs=34;do{x.font="700 "+fs+'px "Jost",system-ui,sans-serif';fs-=2}while(x.measureText(m.t).width>W-80&&fs>16);
+ x.fillText(m.t,W/2,H-82);x.shadowBlur=0;
+ g=x.createLinearGradient(W/2-50,0,W/2+50,0);g.addColorStop(0,q(0));g.addColorStop(1,q(2));x.fillStyle=g;rr(x,W/2-50,H-52,100,4,2);x.fill();
+ const t=new THREE.CanvasTexture(c);return t}
+
+/* contador regresivo dentro de la escena */
+const cd={c:document.createElement("canvas"),last:-1,ok:!isNaN(new Date(CFG.contador.fecha).getTime())};
+cd.c.width=768;cd.c.height=230;cd.x=cd.c.getContext("2d");cd.t=new THREE.CanvasTexture(cd.c);
+function pintaCD(){const T=new Date(CFG.contador.fecha).getTime()-Date.now(),seg=Math.max(0,Math.floor(T/1000));
+ if(seg===cd.last)return;cd.last=seg;
+ const x=cd.x,W=768,H=230,luz=col.celeste.clone().lerp(col.blanco,.55).getStyle();
+ x.clearRect(0,0,W,H);x.textAlign="center";x.textBaseline="middle";x.shadowColor=col.violeta.getStyle();x.shadowBlur=24;
+ if(T<=0){x.fillStyle="#fff";let fs=64;do{x.font="700 "+fs+'px "Jost",system-ui,sans-serif';fs-=2}while(x.measureText(CFG.contador.textoFin).width>W-60&&fs>20);x.fillText(CFG.contador.textoFin,W/2,H/2)}
+ else{x.fillStyle=luz;x.font='500 34px "Jost",system-ui,sans-serif';x.fillText(CFG.contador.etiqueta,W/2,38);
+  const d=Math.floor(seg/86400),h=Math.floor(seg%86400/3600),mi=Math.floor(seg%3600/60),s=seg%60;
+  [[d,"días"],[h,"horas"],[mi,"min"],[s,"seg"]].forEach(([n,u],i)=>{const X=96+i*192;
+   x.fillStyle="#fff";x.font='700 84px "Jost",system-ui,sans-serif';x.fillText(String(n).padStart(2,"0"),X,120);
+   x.fillStyle=luz;x.font='500 28px "Jost",system-ui,sans-serif';x.fillText(u,X,186)})}
+ cd.t.needsUpdate=true}
+
+function montar(){
+ const cyc=[col.rosa,col.violeta,col.celeste,col.blanco];
+ CFG.frases.forEach((f,i)=>{const s=sprite(txt(f,cyc[i%4],"500"),5.4,.675,true);
+  orb.push({s,r:4.6+(i*1.13)%8,a:i*2.4,v:(.05+(i%3)*.02)*(i%2?1:-1),y:(i%5-2)*.35+.5})});
+ CFG.bandas.forEach((b,i)=>{const s=sprite(txt(b,col.blanco,"700",col.celeste),6.2,.775,true);
+  orb.push({s,r:13+(i%3)*1.5,a:i*2.1+.4,v:.03,y:1+(i%2)*.4})});
+ CFG.recuerdos.forEach((m,i)=>{const s=sprite(photocard(m,i),2,2*8.5/5.5,false);s.userData.i=i;
+  orb.push({s,r:5.2+i*2.2,a:i*1.7+.6,v:.04,y:1.9+(i%2)*.5,h:1,card:1});cards.push(s)});
+ if(cd.ok){cd.s=sprite(cd.t,6.6,6.6*230/768,true);cd.s.position.set(0,9.7,0)}}
+Promise.all(["500 40px Jost","700 40px Jost"].map(f=>document.fonts&&document.fonts.load?document.fonts.load(f):0)).catch(()=>{}).then(montar);
+
+/* cámara y control */
+let th=.5,ph=1.15,dist=42,meta=21;const tgt=new THREE.Vector3(0,3,0);
+function ubicar(){cam.position.set(dist*Math.sin(ph)*Math.sin(th),tgt.y+dist*Math.cos(ph),dist*Math.sin(ph)*Math.cos(th));cam.lookAt(tgt)}
+const v2s=new THREE.Vector2();
+function ajustar(){const w=innerWidth,h=innerHeight;R.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix();meta=w<h?27:21;uni.uScale.value=R.getDrawingBufferSize(v2s).y/2}
+addEventListener("resize",ajustar);ajustar();
+const ptr=new Map();let mov=0,pd=0;
+cv.addEventListener("pointerdown",e=>{cv.setPointerCapture(e.pointerId);ptr.set(e.pointerId,e);mov=0;if(ptr.size==2){const[a,b]=[...ptr.values()];pd=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)}});
+cv.addEventListener("pointermove",e=>{const o=ptr.get(e.pointerId);if(!o)return;
+ if(ptr.size==2){ptr.set(e.pointerId,e);const[a,b]=[...ptr.values()],n=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);meta=Math.min(45,Math.max(8,meta*pd/n));pd=n;mov=9;return}
+ th-=(e.clientX-o.clientX)*.006;ph=Math.min(1.5,Math.max(.35,ph-(e.clientY-o.clientY)*.005));mov+=Math.abs(e.clientX-o.clientX)+Math.abs(e.clientY-o.clientY);ptr.set(e.pointerId,e)});
+cv.addEventListener("pointerup",e=>{ptr.delete(e.pointerId);if(mov<8&&!ptr.size&&started)elegir(e)});
+cv.addEventListener("pointercancel",e=>ptr.delete(e.pointerId));
+cv.addEventListener("wheel",e=>{e.preventDefault();meta=Math.min(45,Math.max(8,meta*(1+e.deltaY*.001)))},{passive:false});
+
+const ray=new THREE.Raycaster(),v2=new THREE.Vector2();
+function elegir(e){v2.set(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);ray.camera=cam;ray.setFromCamera(v2,cam);
+ const h=ray.intersectObjects(cards)[0];if(!h)return;const m=CFG.recuerdos[h.object.userData.i];
+ $("mt").textContent=m.t;$("mx").textContent=m.x;const im=$("mi");if(m.img){im.src=m.img;im.alt=m.t;im.hidden=false}else im.hidden=true;
+ $("modal").classList.remove("off");$("volver").focus()}
+$("volver").onclick=()=>$("modal").classList.add("off");
+addEventListener("keydown",e=>{if(e.key==="Escape")$("modal").classList.add("off")});
+
+let started=false;
+$("entrar").onclick=()=>{started=true;$("intro").classList.add("off");setTimeout(()=>$("pista").style.opacity=1,1200);setTimeout(()=>$("pista").style.opacity=0,8000)};
+$("entrar").focus();
+
+const cyc=[col.rosa,col.violeta,col.celeste,col.blanco],tmp=new THREE.Color();
+let t0=performance.now(),tick=-1;
+(function loop(now){requestAnimationFrame(loop);const dt=Math.min(Math.max((now-t0)/1000,0),.05);t0=now;
+ dist+=(meta-dist)*Math.min(dt*(started?1.6:.6),1);
+ const T=now*.001;uni.uT.value=T;
+ if(!reduce){G.rotation.y+=dt*.06;if(!ptr.size)th+=dt*.03}
+ orb.forEach(o=>{if(!reduce)o.a+=o.v*dt;
+  o.s.position.set(Math.cos(o.a)*o.r,o.y+(o.h&&!reduce?Math.sin(now*.002+o.a)*.15:0),Math.sin(o.a)*o.r);
+  if(o.card&&!reduce)o.s.material.rotation=Math.sin(now*.0011+o.a*3)*.06});
+ /* pulso lightstick: doble latido y ciclo de color */
+ let b=0;if(!reduce){const p=(T*.9)%1;b=Math.exp(-Math.pow((p-.08)*11,2))+.6*Math.exp(-Math.pow((p-.28)*11,2))}
+ const n=cyc.length,xx=reduce?0:(T/2.2)%n,i=xx|0,f=xx-i;
+ tmp.copy(cyc[i]).lerp(cyc[(i+1)%n],f*f*(3-2*f));
+ HM.color.copy(tmp);halo.material.color.copy(tmp);halo.material.opacity=.3+.45*b;
+ const sc=1+.07*b;HG.scale.set(sc,sc,sc);HG.rotation.y=reduce?0:Math.sin(T*.4)*.5;
+ const ns=(Date.now()/1000)|0;if(ns!==tick&&cd.ok){tick=ns;pintaCD()}
+ ubicar();R.render(S,cam)})(t0);
+</script>
+</body>
+</html>
